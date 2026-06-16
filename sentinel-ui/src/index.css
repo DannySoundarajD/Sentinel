@@ -1,0 +1,142 @@
+/* ═══════════════════════════════════════════════════════════════
+   Sentinel — Windows Explorer-inspired Design System
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Dark Theme (default) ─────────────────────────────────────── */
+:root,
+[data-theme="dark"] {
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252526;
+  --bg-tertiary: #2d2d2d;
+  --bg-elevated: #333333;
+  --bg-hover: #3c3c3c;
+  --bg-active: #094771;
+
+  --text-primary: #cccccc;
+  --text-secondary: #858585;
+  --text-bright: #e8e8e8;
+  --text-on-accent: #ffffff;
+
+  --accent: #0078d4;
+  --accent-rgb: 0, 120, 212;
+  --accent-hover: #1a8ae8;
+  --accent-pressed: #005a9e;
+
+  --border: #3c3c3c;
+  --border-subtle: #2d2d2d;
+  --border-focus: #0078d4;
+
+  --danger: #d32f2f;
+  --danger-bg: rgba(211, 47, 47, 0.12);
+  --success: #388e3c;
+  --success-bg: rgba(56, 142, 60, 0.12);
+  --warning: #f57c00;
+  --warning-bg: rgba(245, 124, 0, 0.12);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  --font-family: "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  color-scheme: dark;
+}
+
+/* ── Light Theme ──────────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f3f3f3;
+  --bg-tertiary: #e8e8e8;
+  --bg-elevated: #ffffff;
+  --bg-hover: #e5e5e5;
+  --bg-active: #cce4f7;
+
+  --text-primary: #1a1a1a;
+  --text-secondary: #616161;
+  --text-bright: #000000;
+  --text-on-accent: #ffffff;
+
+  --accent: #0067c0;
+  --accent-rgb: 0, 103, 192;
+  --accent-hover: #0078d4;
+  --accent-pressed: #005a9e;
+
+  --border: #d1d1d1;
+  --border-subtle: #e0e0e0;
+  --border-focus: #0067c0;
+
+  --danger: #c62828;
+  --danger-bg: rgba(198, 40, 40, 0.08);
+  --success: #2e7d32;
+  --success-bg: rgba(46, 125, 50, 0.08);
+  --warning: #ef6c00;
+  --warning-bg: rgba(239, 108, 0, 0.08);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.16);
+
+  color-scheme: light;
+}
+
+/* ── Base Reset ───────────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  font-size: 13px;
+  line-height: 1.5;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* ── Scrollbar (Windows-style thin) ───────────────────────────── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* ── Selection ────────────────────────────────────────────────── */
+::selection {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+/* ── Utility ──────────────────────────────────────────────────── */
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}

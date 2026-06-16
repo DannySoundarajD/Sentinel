@@ -1,0 +1,1 @@
+pub async fn check_health() -> anyhow::Result<bool> { Ok(true) }

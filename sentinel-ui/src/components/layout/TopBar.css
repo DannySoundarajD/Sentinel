@@ -1,0 +1,119 @@
+.top-bar {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  transition: background-color 0.2s ease;
+}
+
+.top-bar-left {
+  display: flex;
+  align-items: center;
+}
+
+.window-controls {
+  display: flex;
+  gap: 8px;
+  margin-right: 12px;
+  align-items: center;
+}
+
+.win-btn {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: filter 0.1s ease;
+  -webkit-app-region: no-drag;
+}
+
+.win-btn:hover {
+  filter: brightness(0.85);
+}
+
+.win-btn.close {
+  background-color: #ff5f56;
+}
+
+.win-btn.minimize {
+  background-color: #ffbd2e;
+}
+
+.win-btn.maximize {
+  background-color: #27c93f;
+}
+
+.logo {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--accent);
+  letter-spacing: 0.3px;
+}
+
+.top-bar-center {
+  display: flex;
+  align-items: center;
+}
+
+.model-badge {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  padding: 2px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mode-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.mode-badge.lite {
+  color: var(--accent);
+  background: var(--bg-tertiary);
+}
+
+.mode-badge.pro {
+  color: var(--success);
+  background: var(--success-bg);
+  border-color: var(--success);
+}
+
+.theme-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+  -webkit-app-region: no-drag;
+}
+
+.theme-toggle:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-bright);
+  border-color: var(--accent);
+}

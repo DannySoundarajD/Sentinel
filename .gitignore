@@ -1,0 +1,42 @@
+# Rust build output
+/target/
+*.rs.bk
+
+# Node / Electron
+sentinel-ui/node_modules/
+sentinel-ui/dist/
+sentinel-ui/.vite/
+
+# Distribution artifacts
+*.AppImage
+*.deb
+*.rpm
+
+# Secrets and local config
+.env
+.env.*
+*.toml.local
+
+# OS clutter
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Database files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
