@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Settings as SettingsIcon, Save, Key, Cpu, Shield, ToggleLeft, Moon, Sun, Info } from 'lucide-react';
-import { fetchSettings, updateSettings, fetchModels } from '../api';
+import { Settings as SettingsIcon, Save, Key, Cpu, Shield, ToggleLeft, Moon, Sun, Info, Zap } from 'lucide-react';
+import { fetchSettings, updateSettings, fetchModels, fetchHardwareMetrics } from '../api';
 import './Settings.css';
 
 interface SettingsData {
@@ -10,7 +10,6 @@ interface SettingsData {
   fallback_model?: string;
   ollama_host?: string;
   telegram_token?: string;
-  telegram_chat_id?: string;
   context_window?: number;
   resource_profile?: string;
   telegram_enabled?: boolean;
@@ -30,14 +29,30 @@ export const Settings: React.FC<SettingsProps> = ({ theme, onThemeChange }) => {
   const [models, setModels] = useState<Model[]>([]);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [systemRAM, setSystemRAM] = useState(0);
+  const [recommendedMode, setRecommendedMode] = useState<'lite' | 'pro'>('lite');
 
   useEffect(() => {
     Promise.all([
       fetchSettings(),
-      fetchModels()
-    ]).then(([settingsData, modelsData]) => {
+      fetchModels(),
+      fetchHardwareMetrics()
+    ]).then(([settingsData, modelsData, hwData]) => {
       setSettings(settingsData || {});
       setModels(Array.isArray(modelsData) ? modelsData : []);
+      
+      // Detect system RAM and recommend mode
+      const totalRAM = hwData?.ram_total_mb || 0;
+      setSystemRAM(totalRAM);
+      
+      // Recommend Pro mode if RAM >= 12GB
+      const recommended = totalRAM >= 12000 ? 'pro' : 'lite';
+      setRecommendedMode(recommended);
+      
+      // Auto-upgrade to Pro if system is capable and currently in Lite
+      if (totalRAM >= 12000 && settingsData?.memory_mode === 'lite') {
+        setSettings(prev => ({ ...prev, memory_mode: 'pro' }));
+      }
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -53,12 +68,16 @@ export const Settings: React.FC<SettingsProps> = ({ theme, onThemeChange }) => {
       memory_mode: settings.memory_mode,
       resource_profile: settings.resource_profile || 'balanced',
       telegram_token: settings.telegram_token,
-      telegram_chat_id: settings.telegram_chat_id,
       telegram_enabled: settings.telegram_enabled
     };
     await updateSettings(payload);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const formatRAM = (mb: number) => {
+    if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+    return `${mb} MB`;
   };
 
   if (loading) {
@@ -83,6 +102,29 @@ export const Settings: React.FC<SettingsProps> = ({ theme, onThemeChange }) => {
           <Save size={14} /> {saved ? 'Configuration Saved!' : 'Save Configuration'}
         </button>
       </div>
+
+      {/* System Capabilities Info */}
+      <section className="settings-section">
+        <h3 className="settings-section-title"><Zap size={14} /> System Capabilities</h3>
+        <div className="settings-group">
+          <div className="system-info-grid">
+            <div className="system-stat">
+              <span className="stat-label">Total RAM</span>
+              <span className="stat-value">{formatRAM(systemRAM)}</span>
+            </div>
+            <div className="system-stat">
+              <span className="stat-label">Recommended Mode</span>
+              <span className={`stat-value ${recommendedMode === 'pro' ? 'pro-badge' : 'lite-badge'}`}>
+                {recommendedMode === 'pro' ? 'Pro Mode' : 'Lite Mode'}
+              </span>
+            </div>
+            <div className="system-stat">
+              <span className="stat-label">Context Window</span>
+              <span className="stat-value">{settings.context_window || 4096} tokens</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* General Settings */}
       <section className="settings-section">
@@ -162,24 +204,29 @@ export const Settings: React.FC<SettingsProps> = ({ theme, onThemeChange }) => {
           <div className="setting-row">
             <label className="setting-label">
               Vault Memory Mode
-              <span className="setting-hint">Pro mode enables deep context generation using database vector indexing. Lite is passive recall.</span>
+              <span className="setting-hint">
+                Pro mode enables deep context generation using database vector indexing. 
+                {systemRAM >= 12000 && ' Your system has sufficient RAM for Pro mode.'}
+              </span>
             </label>
             <select
               className="setting-select wide"
-              value={settings.memory_mode || 'lite'}
+              value={settings.memory_mode || recommendedMode}
               onChange={e => handleChange('memory_mode', e.target.value)}
             >
               <option value="lite">Lite Mode (Low Memory Overhead)</option>
-              <option value="pro">Pro Mode (Dynamic Vector Knowledge Base)</option>
+              <option value="pro">Pro Mode (Dynamic Vector Knowledge Base) {systemRAM >= 12000 ? '✓ Recommended' : ''}</option>
             </select>
           </div>
 
-          <div className="setting-row info-row">
-            <div className="info-box">
-              <Info size={14} />
-              <span>Current System Context Window limit is: <strong>{settings.context_window || 4096} tokens</strong> (dynamically scaled).</span>
+          {systemRAM < 12000 && settings.memory_mode === 'pro' && (
+            <div className="setting-row info-row warning">
+              <div className="info-box warning">
+                <Info size={14} />
+                <span>Warning: Pro mode requires at least 12GB RAM. Your system has {formatRAM(systemRAM)}. Performance may be degraded.</span>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </section>
 
@@ -201,34 +248,19 @@ export const Settings: React.FC<SettingsProps> = ({ theme, onThemeChange }) => {
           </div>
 
           {settings.telegram_enabled && (
-            <>
-              <div className="setting-row">
-                <label className="setting-label">
-                  Bot Father Token
-                  <span className="setting-hint">Obtain token from @BotFather.</span>
-                </label>
-                <input
-                  className="setting-input"
-                  type="password"
-                  value={settings.telegram_token || ''}
-                  onChange={e => handleChange('telegram_token', e.target.value)}
-                  placeholder="e.g. 123456789:ABCDefGhI..."
-                />
-              </div>
-
-              <div className="setting-row">
-                <label className="setting-label">
-                  Authorized Chat ID
-                  <span className="setting-hint">Whitelist specific Chat ID to prevent unauthorized access.</span>
-                </label>
-                <input
-                  className="setting-input"
-                  value={settings.telegram_chat_id || ''}
-                  onChange={e => handleChange('telegram_chat_id', e.target.value)}
-                  placeholder="e.g. 987654321"
-                />
-              </div>
-            </>
+            <div className="setting-row">
+              <label className="setting-label">
+                Bot Token
+                <span className="setting-hint">Obtain token from @BotFather on Telegram.</span>
+              </label>
+              <input
+                className="setting-input"
+                type="password"
+                value={settings.telegram_token || ''}
+                onChange={e => handleChange('telegram_token', e.target.value)}
+                placeholder="e.g. 123456789:ABCDefGhI..."
+              />
+            </div>
           )}
         </div>
       </section>

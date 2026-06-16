@@ -1,16 +1,38 @@
 use std::sync::Arc;
 use teloxide::prelude::*;
+use uuid::Uuid;
 use crate::api::AppState;
+use crate::tools::CodePreviewTool;
 
 pub struct TelegramBridge;
 
 impl TelegramBridge {
     pub async fn start(state: AppState, token: String) -> anyhow::Result<()> {
+        println!("🤖 Initializing Telegram bot...");
+        
+        // Create bot with timeout configuration
         let bot = Bot::new(token);
+        
+        // Test connection first
+        match bot.get_me().await {
+            Ok(me) => {
+                println!("✓ Telegram bot connected: @{}", me.username());
+                println!("  Bot name: {}", me.first_name);
+            }
+            Err(e) => {
+                eprintln!("❌ Failed to connect to Telegram API: {}", e);
+                eprintln!("   This could be due to:");
+                eprintln!("   - Invalid bot token");
+                eprintln!("   - No internet connection");
+                eprintln!("   - Telegram API is blocked/unavailable");
+                eprintln!("   - Firewall blocking Telegram");
+                return Err(anyhow::anyhow!("Telegram connection failed: {}", e));
+            }
+        }
         
         let state_clone = state.clone();
 
-        println!("Telegram bridge starting...");
+        println!("📡 Starting Telegram message handler...");
 
         let handler = dptree::entry()
             .branch(
@@ -22,11 +44,23 @@ impl TelegramBridge {
                             return Ok(());
                         }
 
+                        let msg_id = Uuid::new_v4().to_string();
+                        let timestamp = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+
+                        // Persist user message to vault
+                        let vault = state.vault.lock().await;
+                        let _ = vault.persist_chat_message(&msg_id, None, "user", text, timestamp as i64);
+                        drop(vault);
+
                         // Help menu command list
                         if text == "/" || text == "/help" {
                             let help_text = "Available commands:\n\n\
                                              • /new - Start a fresh chat session\n\
                                              • /reset - Clear conversation history\n\
+                                             • /history - Show recent chat history\n\
                                              • /status - Show CPU/RAM/GPU metrics\n\
                                              • /model <name> - Switch Ollama model\n\
                                              • /reason - Toggle reasoning mode\n\
@@ -36,8 +70,39 @@ impl TelegramBridge {
                                              • /test <cmd> - Run validation check\n\
                                              • /doc <topic> - Generate documentation\n\
                                              • /exec <cmd> - Run a shell command\n\
+                                             • /code <lang> <code> - Execute code (py/js/rust/bash)\n\
+                                             • /analyze <code> - Analyze code complexity\n\
+                                             • /format <code> - Format code\n\
                                              • /save <fact> - Save fact to memory Vault";
                             let _ = bot.send_message(msg.chat.id, help_text).await;
+                            return Ok(());
+                        }
+
+                        // Show chat history
+                        if text == "/history" {
+                            let vault = state.vault.lock().await;
+                            match vault.load_chat_history(20) {
+                                Ok(history) => {
+                                    if history.is_empty() {
+                                        let _ = bot.send_message(msg.chat.id, "📭 No chat history found.").await;
+                                    } else {
+                                        let mut hist_text = String::from("📋 Recent Chat History:\n\n");
+                                        for h in history.iter().rev().take(10) {
+                                            let role = if h.role == "user" { "👤 You" } else { "🤖 Sentinel" };
+                                            let preview = if h.content.len() > 100 {
+                                                format!("{}...", &h.content[..100])
+                                            } else {
+                                                h.content.clone()
+                                            };
+                                            hist_text.push_str(&format!("{}: {}\n\n", role, preview));
+                                        }
+                                        let _ = bot.send_message(msg.chat.id, hist_text).await;
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = bot.send_message(msg.chat.id, format!("❌ Error loading history: {}", e)).await;
+                                }
+                            }
                             return Ok(());
                         }
 
@@ -109,6 +174,68 @@ impl TelegramBridge {
                             return Ok(());
                         }
 
+                        // Code execution commands
+                        if text.starts_with("/code ") {
+                            let parts: Vec<&str> = text[6..].trim().splitn(2, ' ').collect();
+                            if parts.len() < 2 {
+                                let _ = bot.send_message(msg.chat.id, "Usage: /code <language> <code>\nSupported: py, js, rust, bash, html").await;
+                                return Ok(());
+                            }
+                            let language = parts[0];
+                            let code = parts[1];
+                            
+                            let _ = bot.send_message(msg.chat.id, "⚙️ Executing code...").await;
+                            let output = CodePreviewTool::execute(language, code);
+                            
+                            let reply_id = Uuid::new_v4().to_string();
+                            let vault = state.vault.lock().await;
+                            let _ = vault.persist_chat_message(&reply_id, None, "assistant", &output, (timestamp + 1) as i64);
+                            drop(vault);
+                            
+                            let formatted = if output.len() > 4000 {
+                                format!("```\n{}\n```", &output[..3900])
+                            } else {
+                                format!("```\n{}\n```", output)
+                            };
+                            let _ = bot.send_message(msg.chat.id, formatted).await;
+                            return Ok(());
+                        }
+
+                        if text.starts_with("/analyze ") {
+                            let code = text[9..].trim();
+                            if code.is_empty() {
+                                let _ = bot.send_message(msg.chat.id, "Please provide code to analyze.").await;
+                                return Ok(());
+                            }
+                            let analysis = CodePreviewTool::analyze("rust", code);
+                            
+                            let reply_id = Uuid::new_v4().to_string();
+                            let analysis_str = serde_json::to_string_pretty(&analysis).unwrap_or_default();
+                            let vault = state.vault.lock().await;
+                            let _ = vault.persist_chat_message(&reply_id, None, "assistant", &analysis_str, (timestamp + 1) as i64);
+                            drop(vault);
+                            
+                            let _ = bot.send_message(msg.chat.id, format!("📊 Code Analysis:\n```json\n{}\n```", analysis_str)).await;
+                            return Ok(());
+                        }
+
+                        if text.starts_with("/format ") {
+                            let code = text[8..].trim();
+                            if code.is_empty() {
+                                let _ = bot.send_message(msg.chat.id, "Please provide code to format.").await;
+                                return Ok(());
+                            }
+                            let formatted = CodePreviewTool::format("python", code);
+                            
+                            let reply_id = Uuid::new_v4().to_string();
+                            let vault = state.vault.lock().await;
+                            let _ = vault.persist_chat_message(&reply_id, None, "assistant", &formatted, (timestamp + 1) as i64);
+                            drop(vault);
+                            
+                            let _ = bot.send_message(msg.chat.id, format!("✨ Formatted Code:\n```python\n{}\n```", formatted)).await;
+                            return Ok(());
+                        }
+
                         // Chat and prompt commands
                         let mut final_prompt = String::new();
                         if text.starts_with("/chat ") {
@@ -125,6 +252,9 @@ impl TelegramBridge {
                             final_prompt = format!("{{\n  \"tool\": \"bash_exec\",\n  \"arguments\": {{\n    \"command\": \"{}\"\n  }}\n}}", text[6..].trim());
                         } else if text.starts_with("/test ") {
                             final_prompt = format!("{{\n  \"tool\": \"bash_exec\",\n  \"arguments\": {{\n    \"command\": \"{}\"\n  }}\n}}", text[6..].trim());
+                        } else if !text.starts_with("/") {
+                            // Regular message - treat as chat
+                            final_prompt = text.to_string();
                         }
 
                         if final_prompt.is_empty() {
@@ -153,7 +283,19 @@ impl TelegramBridge {
                             Ok(resp) => {
                                 if let Ok(body) = resp.json::<serde_json::Value>().await {
                                     let reply = body["response"].as_str().unwrap_or("Error generating response");
-                                    let _ = bot.send_message(msg.chat.id, reply).await;
+                                    
+                                    // Persist assistant response to vault
+                                    let reply_id = Uuid::new_v4().to_string();
+                                    let vault = state.vault.lock().await;
+                                    let _ = vault.persist_chat_message(&reply_id, None, "assistant", reply, (timestamp + 1) as i64);
+                                    drop(vault);
+                                    
+                                    let formatted_reply = if reply.len() > 4000 {
+                                        format!("{}...\n\n(truncated)", &reply[..3900])
+                                    } else {
+                                        reply.to_string()
+                                    };
+                                    let _ = bot.send_message(msg.chat.id, formatted_reply).await;
                                 } else {
                                     let _ = bot.send_message(msg.chat.id, "Error parsing response").await;
                                 }

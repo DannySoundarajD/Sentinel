@@ -200,3 +200,14 @@ pub async fn load_summary(
 
     Err((StatusCode::BAD_REQUEST, "No messages stored in this session".to_string()))
 }
+
+/// Get all chat history (including both UI and Telegram messages)
+pub async fn get_all_chat_history(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<super::ChatMessage>>, (StatusCode, String)> {
+    let vault = state.vault.lock().await;
+    let messages = vault.load_chat_history(1000)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load chat history: {}", e)))?;
+    
+    Ok(Json(messages))
+}

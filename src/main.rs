@@ -115,8 +115,30 @@ async fn run_api_server() -> anyhow::Result<()> {
     // Load chat history from SQLite on startup
     let initial_history = vault.load_chat_history(100).unwrap_or_default();
 
-    // Initialize Runtime
+    // Initialize Runtime and wait for Ollama to be ready
     let runtime = OllamaRuntime::new(&config.runtime.ollama_host);
+    
+    // Wait for Ollama to be accessible
+    println!("⏳ Waiting for Ollama at {}...", config.runtime.ollama_host);
+    let mut retry_count = 0;
+    const MAX_RETRIES: u32 = 30; // 30 seconds max wait
+    
+    loop {
+        if runtime.detect_ollama().await {
+            println!("✓ Ollama is ready!");
+            break;
+        }
+        
+        retry_count += 1;
+        if retry_count >= MAX_RETRIES {
+            eprintln!("❌ Ollama not responding at {} after {}s", config.runtime.ollama_host, MAX_RETRIES);
+            eprintln!("Please ensure Ollama is running: ollama serve");
+            return Err(anyhow::anyhow!("Ollama connection timeout"));
+        }
+        
+        println!("⏳ Ollama not ready yet, retrying... ({}/{})", retry_count, MAX_RETRIES);
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    }
 
     // Initialize Guardian
     let guardian = Guardian::new();
@@ -132,13 +154,22 @@ async fn run_api_server() -> anyhow::Result<()> {
 
     // Initialize Telegram Bridge if enabled
     if let Some(ref tg_config) = config.telegram {
+        println!("📱 Telegram config found");
         if !tg_config.bot_token.is_empty() {
+            println!("🤖 Starting Telegram bridge with token: {}...", &tg_config.bot_token[..15]);
             let state_clone = state.clone();
             let token = tg_config.bot_token.clone();
             tokio::spawn(async move {
-                let _ = crate::bridge::TelegramBridge::start(state_clone, token).await;
+                match crate::bridge::TelegramBridge::start(state_clone, token).await {
+                    Ok(_) => println!("✓ Telegram bridge started successfully"),
+                    Err(e) => eprintln!("❌ Telegram bridge failed to start: {}", e),
+                }
             });
+        } else {
+            println!("⚠️  Telegram bot token is empty");
         }
+    } else {
+        println!("ℹ️  No Telegram configuration found");
     }
 
     // Build router and start server

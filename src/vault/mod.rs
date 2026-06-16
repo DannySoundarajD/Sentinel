@@ -407,18 +407,25 @@ impl Vault {
     }
 
     pub fn load_chat_history(&self, limit: usize) -> Result<Vec<ChatMessage>> {
-        // Find the most recent session ID
-        let latest_session: Option<i64> = self.conn.query_row(
-            "SELECT id FROM conversation_summaries ORDER BY timestamp DESC LIMIT 1",
-            [],
-            |r| r.get(0)
-        ).ok();
-
-        if let Some(session_id) = latest_session {
-            self.load_chat_history_for_session(session_id, limit)
-        } else {
-            Ok(Vec::new())
-        }
+        // Load messages from all sessions, ordered by timestamp DESC, limited to most recent N messages
+        let mut stmt = self.conn.prepare(
+            "SELECT id, role, content, timestamp
+             FROM chat_history
+             ORDER BY timestamp DESC
+             LIMIT ?1"
+        )?;
+        let mut msgs: Vec<ChatMessage> = stmt.query_map(params![limit as i64], |r| {
+            Ok(ChatMessage {
+                id: r.get(0)?,
+                role: r.get(1)?,
+                content: r.get(2)?,
+                timestamp: r.get(3)?,
+            })
+        })?.filter_map(|r| r.ok()).collect();
+        
+        // Reverse to get chronological order (oldest first)
+        msgs.reverse();
+        Ok(msgs)
     }
 
     pub fn clear_chat_history(&self) -> Result<()> {

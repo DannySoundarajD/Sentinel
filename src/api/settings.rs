@@ -80,7 +80,7 @@ pub async fn update_settings(
     }
     
     let telegram_enabled = payload.telegram_enabled.unwrap_or(config.telegram.is_some());
-    if telegram_enabled {
+    let should_restart_telegram = if telegram_enabled {
         let token = payload.telegram_token
             .clone()
             .or_else(|| config.telegram.as_ref().map(|t| t.bot_token.clone()))
@@ -90,20 +90,44 @@ pub async fn update_settings(
             .or_else(|| config.telegram.as_ref().and_then(|t| t.allowed_users.first().cloned()))
             .unwrap_or_default();
         
-        if !token.is_empty() {
-            config.telegram = Some(crate::config::schema::TelegramConfig {
-                bot_token: token,
+        let changed = if !token.is_empty() {
+            let new_config = crate::config::schema::TelegramConfig {
+                bot_token: token.clone(),
                 allowed_users: if chat_id.is_empty() { vec![] } else { vec![chat_id] },
-            });
+            };
+            let changed = config.telegram.as_ref().map(|t| t.bot_token != token).unwrap_or(true);
+            config.telegram = Some(new_config);
+            changed
         } else {
             config.telegram = None;
-        }
+            false
+        };
+        changed
     } else {
         config.telegram = None;
-    }
+        false
+    };
     
     config.save()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save config: {}", e)))?;
+    
+    // Start Telegram bridge if config was just added/changed
+    if should_restart_telegram && telegram_enabled {
+        if let Some(ref tg_config) = config.telegram {
+            if !tg_config.bot_token.is_empty() {
+                println!("🔄 Restarting Telegram bridge with new config...");
+                let state_clone = state.clone();
+                let token = tg_config.bot_token.clone();
+                drop(config); // Release lock before spawning
+                tokio::spawn(async move {
+                    match crate::bridge::TelegramBridge::start(state_clone, token).await {
+                        Ok(_) => println!("✓ Telegram bridge restarted successfully"),
+                        Err(e) => eprintln!("❌ Telegram bridge failed to restart: {}", e),
+                    }
+                });
+            }
+        }
+    }
     
     Ok(Json(json!({"success": true})))
 }

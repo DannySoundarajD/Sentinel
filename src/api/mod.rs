@@ -13,6 +13,7 @@ use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
 mod chat;
+mod code;
 mod guardian;
 mod runtime;
 mod settings;
@@ -48,6 +49,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/chat/history", delete(chat::delete_history))
         .route("/chat/session/new", post(chat::start_new_session))
 
+        // Code execution routes (IDE features)
+        .route("/code/execute", post(code::execute))
+        .route("/code/analyze", post(code::analyze))
+        .route("/code/format", post(code::format))
+
         // Runtime routes
         .route("/runtime/status", get(runtime::get_status))
         .route("/runtime/hardware", get(runtime::get_hardware))
@@ -72,6 +78,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/vault/save", post(vault::save_memory))
         .route("/vault/summary/{id}", delete(vault::delete_summary))
         .route("/vault/summary/{id}/load", post(vault::load_summary))
+        .route("/vault/chat/history", get(vault::get_all_chat_history))
 
         // Guardian routes
         .route("/guardian/status", get(guardian::get_status))

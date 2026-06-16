@@ -22,6 +22,7 @@ export const deleteModel = (name: string) =>
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────
 export const fetchChatHistory = () => fetch(`${BASE}/chat/history`).then(r => r.json());
+export const fetchAllChatHistory = () => fetch(`${BASE}/vault/chat/history`).then(r => r.json());
 export const clearChatHistory = () => fetch(`${BASE}/chat/history`, { method: 'DELETE' }).then(r => r.json());
 export const startNewSession = () => fetch(`${BASE}/chat/session/new`, { method: 'POST' }).then(r => r.json());
 
@@ -120,3 +121,25 @@ export const fetchOllamaLibraryIndex = (): Promise<string> =>
 export const fetchOllamaModelPage = (modelBase: string): Promise<string> =>
   fetch(`${BASE}/runtime/proxy/ollama?path=${encodeURIComponent(`/library/${modelBase}`)}`)
     .then(r => r.text());
+
+// ─── Code Execution (IDE Features) ────────────────────────────────────────────
+export const executeCode = (language: string, code: string) =>
+  fetch(`${BASE}/code/execute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ language, code })
+  }).then(r => r.json());
+
+export const analyzeCode = (language: string, code: string) =>
+  fetch(`${BASE}/code/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ language, code })
+  }).then(r => r.json());
+
+export const formatCode = (language: string, code: string) =>
+  fetch(`${BASE}/code/format`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ language, code })
+  }).then(r => r.json());

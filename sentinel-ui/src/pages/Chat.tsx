@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Trash2, Copy, RefreshCw, PanelLeftOpen, PanelLeftClose, PanelRightOpen, PanelRightClose, Plus, AlertCircle } from 'lucide-react';
+import { Send, Trash2, Copy, RefreshCw, PanelLeftOpen, PanelLeftClose, PanelRightOpen, PanelRightClose, Plus, AlertCircle, Code2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import { sendChat, fetchChatHistory, clearChatHistory, fetchVaultSummaries, fetchGuardianStatus, startNewSession, deleteVaultSummary, loadVaultSummary } from '../api';
+import { sendChat, fetchChatHistory, fetchAllChatHistory, clearChatHistory, fetchVaultSummaries, fetchGuardianStatus, startNewSession, deleteVaultSummary, loadVaultSummary, fetchRuntimeStatus } from '../api';
+import { ContextPanel } from '../components/layout/ContextPanel';
+import { CodeExecutor } from '../components/CodeExecutor';
 import './Chat.css';
 
 interface Message {
@@ -49,6 +51,11 @@ export const Chat: React.FC<ChatProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [contextUsage, setContextUsage] = useState(0);
+  const [maxContext, setMaxContext] = useState(4096);
+  const [memoryNodesCount, setMemoryNodesCount] = useState(0);
+  const [hasSummary, setHasSummary] = useState(false);
+  const [showCodeExecutor, setShowCodeExecutor] = useState(false);
   const isStartingSession = useRef(false);
 
   // History pane resize
@@ -81,11 +88,21 @@ export const Chat: React.FC<ChatProps> = ({
 
   // ─── Data Loading ────────────────────────────────────────────
   const refreshHistory = useCallback(() => {
-    fetchChatHistory()
+    // Fetch ALL chat history including Telegram messages
+    fetchAllChatHistory()
       .then((data: Message[]) => {
-        if (Array.isArray(data)) setMessages(data);
+        if (Array.isArray(data)) {
+          setMessages(data);
+        }
       })
-      .catch(() => {});
+      .catch(() => {
+        // Fallback to regular chat history if vault endpoint fails
+        fetchChatHistory()
+          .then((data: Message[]) => {
+            if (Array.isArray(data)) setMessages(data);
+          })
+          .catch(() => {});
+      });
   }, []);
 
   const refreshSummaries = useCallback(() => {
@@ -100,10 +117,71 @@ export const Chat: React.FC<ChatProps> = ({
       .catch(() => {});
   }, []);
 
+  // Estimate tokens from text (rough approximation: ~4 chars per token)
+  const estimateTokens = useCallback((text: string): number => {
+    return Math.ceil(text.length / 4);
+  }, []);
+
+  // Calculate real-time context usage based on current messages
+  const updateContextUsage = useCallback(() => {
+    try {
+      let totalTokens = 0;
+      
+      // System prompt (~200 tokens)
+      totalTokens += 200;
+      
+      // Message history (last 10 messages)
+      const recentMessages = messages.slice(-10);
+      recentMessages.forEach(msg => {
+        totalTokens += estimateTokens(msg.content);
+      });
+      
+      // Current input
+      totalTokens += estimateTokens(input);
+      
+      // Buffer for response (~500 tokens)
+      totalTokens += 500;
+      
+      setContextUsage(totalTokens);
+    } catch (e) {
+      // Fallback
+      setContextUsage(0);
+    }
+  }, [messages, input, estimateTokens]);
+
   useEffect(() => {
     refreshHistory();
     refreshSummaries();
   }, [refreshHistory, refreshSummaries]);
+
+  // Update context usage whenever messages or input changes
+  useEffect(() => {
+    updateContextUsage();
+  }, [messages, input, updateContextUsage]);
+
+  // Poll runtime status for max context and memory count
+  useEffect(() => {
+    const pollStatus = async () => {
+      try {
+        const status = await fetchRuntimeStatus();
+        if (status?.active_model_context) {
+          setMaxContext(status.active_model_context);
+        }
+        if (status?.memory_nodes_injected !== undefined) {
+          setMemoryNodesCount(status.memory_nodes_injected);
+        }
+        if (status?.has_summary !== undefined) {
+          setHasSummary(status.has_summary);
+        }
+      } catch (e) {
+        // Ignore errors
+      }
+    };
+
+    pollStatus();
+    const interval = setInterval(pollStatus, 2000); // Update every 2 seconds for real-time feel
+    return () => clearInterval(interval);
+  }, []);
 
   // Handle scroll event
   const handleScroll = () => {
@@ -481,7 +559,9 @@ export const Chat: React.FC<ChatProps> = ({
         </>
       )}
 
-      {/* Main Chat Frame */}
+      {/* Main Chat Frame with Context Panel */}
+      <div style={{ display: 'flex', flex: 1, minWidth: 0 }}>
+        {/* Chat Main */}
       <div className="chat-main">
         {/* Header */}
         <div className="chat-header">
@@ -513,6 +593,9 @@ export const Chat: React.FC<ChatProps> = ({
             </div>
           </div>
           <div className="chat-header-actions">
+            <button className="header-btn" onClick={() => setShowCodeExecutor(true)} title="Open code executor">
+              <Code2 size={15} /> <span>Code</span>
+            </button>
             <button className="header-btn accent" onClick={handleNewSession} title="New chat session">
               <Plus size={13} /> <span>New Chat</span>
             </button>
@@ -613,40 +696,44 @@ export const Chat: React.FC<ChatProps> = ({
 
                 <div className={`msg-wrapper ${msg.role}`}>
                   <div className={`msg ${msg.role}`}>
-                    <div className="msg-header">
-                      <span className="msg-role-name">
-                        {msg.role === 'user' ? 'You' : 'Sentinel'}
-                      </span>
-                      <span>•</span>
-                      <span className="msg-time-stamp">{formatTime(msg.timestamp)}</span>
+                    <div className="msg-avatar">
+                      {msg.role === 'user' ? '👤' : '🤖'}
+                    </div>
+                    <div className="msg-content-wrapper">
+                      <div className="msg-header">
+                        <span className="msg-role-name">
+                          {msg.role === 'user' ? 'You' : 'Sentinel'}
+                        </span>
+                        <span className="msg-time-stamp">{formatTime(msg.timestamp)}</span>
+                      </div>
+
+                      <div className="msg-body">
+                        {msg.role === 'user' ? (
+                          <div className="msg-content">{msg.content}</div>
+                        ) : (
+                          <div className="markdown-body">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              rehypePlugins={[rehypeRaw]}
+                              components={{
+                                code: renderCode,
+                              }}
+                            >
+                              {msg.content}
+                            </ReactMarkdown>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="msg-body">
-                      {msg.role === 'user' ? (
-                        <div className="msg-content">{msg.content}</div>
-                      ) : (
-                        <div className="markdown-body">
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            rehypePlugins={[rehypeRaw]}
-                            components={{
-                              code: renderCode,
-                            }}
-                          >
-                            {msg.content}
-                          </ReactMarkdown>
-                        </div>
-                      )}
-                    </div>
+                    <button
+                      className="msg-copy-btn"
+                      onClick={() => copyToClipboard(msg.content, msg.id)}
+                      title="Copy message"
+                    >
+                      <Copy size={14} />
+                    </button>
                   </div>
-
-                  <button
-                    className="msg-copy-btn"
-                    onClick={() => copyToClipboard(msg.content, msg.id)}
-                  >
-                    <Copy size={11} />
-                    <span>{copiedId === msg.id ? 'Copied' : 'Copy message'}</span>
-                  </button>
                 </div>
               </React.Fragment>
             );
@@ -656,23 +743,25 @@ export const Chat: React.FC<ChatProps> = ({
           {streaming && (
             <div className="msg-wrapper assistant">
               <div className="msg assistant">
-                <div className="msg-header">
-                  <span className="msg-role-name">Sentinel</span>
-                  <span>•</span>
-                  <span className="streaming-indicator">generating...</span>
-                </div>
-                <div className="msg-body">
-                  <div className="markdown-body">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      rehypePlugins={[rehypeRaw]}
-                      components={{
-                        code: renderCode,
-                      }}
-                    >
-                      {streamingContent}
-                    </ReactMarkdown>
-                    <span className="cursor-blink">│</span>
+                <div className="msg-avatar">🤖</div>
+                <div className="msg-content-wrapper">
+                  <div className="msg-header">
+                    <span className="msg-role-name">Sentinel</span>
+                    <span className="streaming-indicator">⚡ generating...</span>
+                  </div>
+                  <div className="msg-body">
+                    <div className="markdown-body">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        rehypePlugins={[rehypeRaw]}
+                        components={{
+                          code: renderCode,
+                        }}
+                      >
+                        {streamingContent}
+                      </ReactMarkdown>
+                      <span className="cursor-blink">│</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -739,6 +828,24 @@ export const Chat: React.FC<ChatProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Context Panel (Real-time) */}
+      {showContextPanel && (
+        <ContextPanel
+          modelName={activeModel || 'No Model'}
+          contextUsage={contextUsage}
+          maxContext={maxContext}
+          memoryNodes={memoryNodesCount}
+          hasSummary={hasSummary}
+          installedModels={installedModels}
+          onSwitchModel={onSwitchModel}
+          onClose={() => setShowContextPanel(false)}
+        />
+      )}
+    </div>
+
+      {/* Code Executor Modal */}
+      {showCodeExecutor && <CodeExecutor onClose={() => setShowCodeExecutor(false)} />}
     </div>
   );
 };

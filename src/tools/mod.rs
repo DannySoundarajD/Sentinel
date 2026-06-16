@@ -5,6 +5,7 @@ pub mod file_write;
 pub mod memory_store;
 pub mod bash_exec;
 pub mod web_search;
+pub mod code_preview;
 
 pub mod traits;
 
@@ -13,6 +14,7 @@ pub use file_write::FileWriteTool;
 pub use memory_store::MemoryStoreTool;
 pub use bash_exec::BashExecTool;
 pub use web_search::WebSearchTool;
+pub use code_preview::CodePreviewTool;
 pub use traits::Tool;
 
 pub struct ToolRegistry {

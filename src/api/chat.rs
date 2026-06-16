@@ -263,12 +263,28 @@ pub async fn send(
             }
             (name_cand, content.to_string())
         };
+        
+        // Get or create active session BEFORE persisting
         let vault = state.vault.lock().await;
+        let mut active_id_opt = *active_summary_id().lock().await;
+
+        if active_id_opt.is_none() {
+            let title = "Memory save".to_string();
+            let summary = "User saved memory".to_string();
+            if let Ok(_) = vault.save_summary(&title, &summary, None) {
+                let summary_id = vault.conn.last_insert_rowid();
+                if summary_id > 0 {
+                    let mut active_id = active_summary_id().lock().await;
+                    *active_id = Some(summary_id);
+                    active_id_opt = Some(summary_id);
+                }
+            }
+        }
+        
         if let Err(e) = vault.save_memory(&name_str, &description_str) {
             return Ok(sse_message(&format!("Failed to save memory: {}", e), true));
         }
 
-        let active_id_opt = *active_summary_id().lock().await;
         // Persist user command to history
         let _ = vault.persist_chat_message(
             &user_msg_id,
@@ -286,21 +302,31 @@ pub async fn send(
         );
 
         // Also push to in-memory history
-        {
-            let mut history = state.chat_history.lock().await;
-            history.push(ChatMessage {
-                id: user_msg_id.clone(),
-                role: "user".to_string(),
-                content: message.clone(),
-                timestamp: timestamp as u64,
-            });
-            history.push(ChatMessage {
-                id: assistant_msg_id.clone(),
-                role: "assistant".to_string(),
-                content: "Memory saved successfully.".to_string(),
-                timestamp: (timestamp + 1) as u64,
-            });
+        let mut history = state.chat_history.lock().await;
+        history.push(ChatMessage {
+            id: user_msg_id.clone(),
+            role: "user".to_string(),
+            content: message.clone(),
+            timestamp: timestamp as u64,
+        });
+        history.push(ChatMessage {
+            id: assistant_msg_id.clone(),
+            role: "assistant".to_string(),
+            content: "Memory saved successfully.".to_string(),
+            timestamp: (timestamp + 1) as u64,
+        });
+        
+        // Update messages JSON in summary
+        if let Some(summary_id) = active_id_opt {
+            let messages_json = serde_json::to_string(&*history).ok();
+            if let Some(ref json_str) = messages_json {
+                let _ = vault.conn.execute(
+                    "UPDATE conversation_summaries SET messages = ?1 WHERE id = ?2",
+                    rusqlite::params![json_str, summary_id],
+                );
+            }
         }
+        drop(history);
 
         // Return success SSE without calling Ollama
         return Ok(sse_message("Memory saved successfully.", true));
@@ -311,6 +337,21 @@ pub async fn send(
     // Bare /frommemory with no query — just list all memories
     if (message_lower == "/frommemory") && parts.len() == 1 {
         let vault = state.vault.lock().await;
+        let mut active_id_opt = *active_summary_id().lock().await;
+
+        if active_id_opt.is_none() {
+            let title = "Memory query".to_string();
+            let summary = "User queried memories".to_string();
+            if let Ok(_) = vault.save_summary(&title, &summary, None) {
+                let summary_id = vault.conn.last_insert_rowid();
+                if summary_id > 0 {
+                    let mut active_id = active_summary_id().lock().await;
+                    *active_id = Some(summary_id);
+                    active_id_opt = Some(summary_id);
+                }
+            }
+        }
+        
         let nodes = match vault.list_nodes() {
             Ok(n) => n,
             Err(e) => return Ok(sse_message(&format!("Failed to list memory: {}", e), true)),
@@ -328,7 +369,6 @@ pub async fn send(
             )
         };
 
-        let active_id_opt = *active_summary_id().lock().await;
         // Persist user command to history
         let _ = vault.persist_chat_message(
             &user_msg_id,
@@ -346,27 +386,52 @@ pub async fn send(
         );
 
         // Also push to in-memory history
-        {
-            let mut history = state.chat_history.lock().await;
-            history.push(ChatMessage {
-                id: user_msg_id.clone(),
-                role: "user".to_string(),
-                content: message.clone(),
-                timestamp: timestamp as u64,
-            });
-            history.push(ChatMessage {
-                id: assistant_msg_id.clone(),
-                role: "assistant".to_string(),
-                content: result.clone(),
-                timestamp: (timestamp + 1) as u64,
-            });
+        let mut history = state.chat_history.lock().await;
+        history.push(ChatMessage {
+            id: user_msg_id.clone(),
+            role: "user".to_string(),
+            content: message.clone(),
+            timestamp: timestamp as u64,
+        });
+        history.push(ChatMessage {
+            id: assistant_msg_id.clone(),
+            role: "assistant".to_string(),
+            content: result.clone(),
+            timestamp: (timestamp + 1) as u64,
+        });
+        
+        // Update messages JSON in summary
+        if let Some(summary_id) = active_id_opt {
+            let messages_json = serde_json::to_string(&*history).ok();
+            if let Some(ref json_str) = messages_json {
+                let _ = vault.conn.execute(
+                    "UPDATE conversation_summaries SET messages = ?1 WHERE id = ?2",
+                    rusqlite::params![json_str, summary_id],
+                );
+            }
         }
+        drop(history);
 
         return Ok(sse_message(&result, true));
     }
     
     if message_lower == "/memory" || message_lower == "/memories" {
         let vault = state.vault.lock().await;
+        let mut active_id_opt = *active_summary_id().lock().await;
+
+        if active_id_opt.is_none() {
+            let title = "Memory list".to_string();
+            let summary = "User listed memories".to_string();
+            if let Ok(_) = vault.save_summary(&title, &summary, None) {
+                let summary_id = vault.conn.last_insert_rowid();
+                if summary_id > 0 {
+                    let mut active_id = active_summary_id().lock().await;
+                    *active_id = Some(summary_id);
+                    active_id_opt = Some(summary_id);
+                }
+            }
+        }
+        
         let nodes = match vault.list_nodes() {
             Ok(n) => n,
             Err(e) => return Ok(sse_message(&format!("Failed to list memory: {}", e), true)),
@@ -384,7 +449,6 @@ pub async fn send(
             )
         };
 
-        let active_id_opt = *active_summary_id().lock().await;
         // Persist user command to history
         let _ = vault.persist_chat_message(
             &user_msg_id,
@@ -402,21 +466,31 @@ pub async fn send(
         );
 
         // Also push to in-memory history
-        {
-            let mut history = state.chat_history.lock().await;
-            history.push(ChatMessage {
-                id: user_msg_id.clone(),
-                role: "user".to_string(),
-                content: message.clone(),
-                timestamp: timestamp as u64,
-            });
-            history.push(ChatMessage {
-                id: assistant_msg_id.clone(),
-                role: "assistant".to_string(),
-                content: result.clone(),
-                timestamp: (timestamp + 1) as u64,
-            });
+        let mut history = state.chat_history.lock().await;
+        history.push(ChatMessage {
+            id: user_msg_id.clone(),
+            role: "user".to_string(),
+            content: message.clone(),
+            timestamp: timestamp as u64,
+        });
+        history.push(ChatMessage {
+            id: assistant_msg_id.clone(),
+            role: "assistant".to_string(),
+            content: result.clone(),
+            timestamp: (timestamp + 1) as u64,
+        });
+        
+        // Update messages JSON in summary
+        if let Some(summary_id) = active_id_opt {
+            let messages_json = serde_json::to_string(&*history).ok();
+            if let Some(ref json_str) = messages_json {
+                let _ = vault.conn.execute(
+                    "UPDATE conversation_summaries SET messages = ?1 WHERE id = ?2",
+                    rusqlite::params![json_str, summary_id],
+                );
+            }
         }
+        drop(history);
 
         return Ok(sse_message(&result, true));
     }
@@ -444,23 +518,20 @@ pub async fn send(
         return Ok(Sse::new(ReceiverStream::new(rx).boxed()));
     }
 
-    let history_len = state.chat_history.lock().await.len();
-
-    // Add user message to history
+    // Create user message first (needed for session creation)
     let user_msg = ChatMessage {
         id: user_id.clone(),
         role: "user".to_string(),
         content: message.clone(),
         timestamp,
     };
-    state.chat_history.lock().await.push(user_msg.clone());
 
+    // Get or create active session BEFORE adding message to history
     let vault = state.vault.lock().await;
-
-    // Auto-create active session summary if not already set
     let mut active_id_opt = *active_summary_id().lock().await;
 
     if active_id_opt.is_none() {
+        // Create a new session for this conversation
         let first_user_msg = &message;
         let title = if first_user_msg.trim().starts_with('/') {
             "New Chat".to_string()
@@ -470,15 +541,11 @@ pub async fn send(
             first_user_msg.clone()
         };
         let summary = "Active conversation".to_string();
-        let msg_for_json = ChatMessage {
-            id: user_id.clone(),
-            role: "user".to_string(),
-            content: message.clone(),
-            timestamp,
-        };
-        let messages_json = serde_json::to_string(&vec![msg_for_json]).ok();
         
-        if let Ok(_) = vault.save_summary(&title, &summary, messages_json.as_deref()) {
+        // Initialize with the first message
+        let initial_messages = serde_json::to_string(&vec![user_msg.clone()]).ok();
+        
+        if let Ok(_) = vault.save_summary(&title, &summary, initial_messages.as_deref()) {
             let summary_id = vault.conn.last_insert_rowid();
             if summary_id > 0 {
                 let mut active_id = active_summary_id().lock().await;
@@ -488,7 +555,10 @@ pub async fn send(
         }
     }
 
-    // Persist user message to SQLite
+    // Now add user message to history
+    state.chat_history.lock().await.push(user_msg.clone());
+
+    // Persist user message to SQLite with the session_id
     let _ = vault.persist_chat_message(&user_id, active_id_opt, "user", &message, timestamp as i64);
 
     // Get active model context length dynamically from system spec RAM
@@ -676,7 +746,7 @@ pub async fn send(
         let mut current_context = conversation_text;
 
         let mut loop_count = 0;
-        let mut max_loops = if is_memory_query_clone { 1 } else { 5 };
+        let max_loops = if is_memory_query_clone { 1 } else { 5 };
         let mut full_response = String::new();
 
         while loop_count < max_loops {
@@ -859,9 +929,10 @@ pub async fn send(
                 response_timestamp as i64,
             );
 
-            // Update the messages JSON in the conversation summary
+            // Update the messages JSON in the conversation summary with current full history
             let history = chat_history_clone.lock().await;
             let messages_json = serde_json::to_string(&*history).ok();
+            
             let mut turns = String::new();
             for msg in history.iter() {
                 turns.push_str(&format!("{}: {}\n", msg.role, msg.content));
@@ -997,6 +1068,18 @@ pub async fn send(
 pub async fn get_history(
     State(state): State<AppState>,
 ) -> Json<Vec<ChatMessage>> {
+    // If there's an active session, load history from DB for that session
+    // Otherwise return in-memory history
+    let active_id = *active_summary_id().lock().await;
+    
+    if let Some(session_id) = active_id {
+        let vault = state.vault.lock().await;
+        if let Ok(db_history) = vault.load_chat_history_for_session(session_id, 100) {
+            return Json(db_history);
+        }
+    }
+    
+    // Fallback to in-memory history
     let history = state.chat_history.lock().await;
     Json(history.clone())
 }
@@ -1004,20 +1087,34 @@ pub async fn get_history(
 pub async fn delete_history(
     State(state): State<AppState>,
 ) -> Json<Value> {
+    // Only delete history for the current active session
+    let active_id = *active_summary_id().lock().await;
+    
+    // Clear in-memory history
     state.chat_history.lock().await.clear();
+    
+    // Clear DB history for this session only
     let vault = state.vault.lock().await;
-    let _ = vault.clear_chat_history();
+    if let Some(session_id) = active_id {
+        let _ = vault.clear_chat_history_for_session(session_id);
+    }
+    
     Json(json!({"success": true}))
 }
 
 pub async fn start_new_session(
     State(state): State<AppState>,
 ) -> Json<Value> {
+    // Get the current history before clearing
     let history = state.chat_history.lock().await;
+    
+    // If history is empty, just reset and return
     if history.is_empty() {
+        drop(history);
+        *active_summary_id().lock().await = None;
         return Json(json!({"success": true, "message": "History already empty"}));
     }
-
+    
     // Format chat turns for summarizer prompt & serialize messages
     let mut turns = String::new();
     for msg in history.iter() {
@@ -1028,14 +1125,25 @@ pub async fn start_new_session(
     // Find the first *real* (non-command) user message for the title
     let first_real_msg = history.iter()
         .find(|m| m.role == "user" && !m.content.trim().starts_with('/'))
-        .map(|m| m.content.as_str())
-        .unwrap_or("");
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
 
+    // Generate a smart title from first message
     let title = if !first_real_msg.is_empty() {
-        let words: Vec<&str> = first_real_msg.split_whitespace().take(5).collect();
-        let candidate = words.join(" ");
-        if candidate.len() > 40 {
-            format!("{}...", &candidate[..40])
+        let words: Vec<&str> = first_real_msg
+            .split_whitespace()
+            .filter(|w| w.len() > 2) // Skip short words
+            .take(4) // Take first 4 meaningful words
+            .collect();
+        
+        let candidate = if words.is_empty() {
+            first_real_msg.clone()
+        } else {
+            words.join(" ")
+        };
+        
+        if candidate.len() > 50 {
+            format!("{}...", &candidate[..50])
         } else {
             candidate
         }
@@ -1047,33 +1155,26 @@ pub async fn start_new_session(
         if first_real_msg.len() > 80 {
             format!("{}...", &first_real_msg[..80])
         } else {
-            first_real_msg.to_string()
+            first_real_msg.clone()
         }
     } else {
-        "Empty session".to_string()
+        "Session with assistant".to_string()
     };
 
-    // Only run async AI summarizer when there was a real conversation
     let has_real_exchange = !first_real_msg.is_empty();
-
     drop(history);
 
-    // Save summary in database with heuristic first
-    let is_pro = {
-        let config = state.config.lock().await;
-        config.vault.memory_mode == "pro"
-    };
-
+    // Save current session
     let vault = state.vault.lock().await;
 
-    // Check if we already have an active summary for this conversation — update it instead of creating a duplicate
+    // Check if we already have an active summary for this conversation
     let existing_active_id = {
         let active_id = active_summary_id().lock().await;
         *active_id
     };
 
     let summary_id = if let Some(existing_id) = existing_active_id {
-        // Update the existing session row with final title/summary/messages
+        // Update the existing session with final data
         if let Some(ref json_str) = messages_json {
             let _ = vault.conn.execute(
                 "UPDATE conversation_summaries SET title = ?1, summary = ?2, messages = ?3 WHERE id = ?4",
@@ -1081,28 +1182,34 @@ pub async fn start_new_session(
             );
         }
         existing_id
-    } else {
-        // No tracked session yet — create a new row
+    } else if has_real_exchange {
+        // Create new session only if there was a real conversation
         match vault.save_summary(&title, &summary, messages_json.as_deref()) {
             Ok(_) => vault.conn.last_insert_rowid(),
             Err(_) => 0,
         }
+    } else {
+        0
     };
     
-    // Clear in-memory chat history but keep it in the database for the old session
-    state.chat_history.lock().await.clear();
     drop(vault);
-
-    // Reset active summary ID so the next conversation gets a fresh session
+    
+    // Clear in-memory chat history and reset session
+    state.chat_history.lock().await.clear();
     *active_summary_id().lock().await = None;
 
-    // Spawn background task to update summary asynchronously if a model is loaded (Pro mode only to save resources)
+    // Spawn background task to update summary asynchronously in Pro mode
     let active_model = {
         let config = state.config.lock().await;
         config.runtime.default_model.clone()
     };
 
-    if !active_model.is_empty() && summary_id > 0 && is_pro && has_real_exchange {
+    let is_pro = {
+        let config = state.config.lock().await;
+        config.vault.memory_mode == "pro"
+    };
+
+    if !active_model.is_empty() && is_pro && has_real_exchange && summary_id > 0 {
         let ollama_host = {
             let config = state.config.lock().await;
             config.runtime.ollama_host.clone()
@@ -1110,11 +1217,12 @@ pub async fn start_new_session(
         let vault_clone = Arc::clone(&state.vault);
         let title_fallback = title.clone();
         let summary_fallback = summary.clone();
+        let turns_for_async = turns.clone();
 
         tokio::spawn(async move {
             let summarizer_prompt = format!(
-                "Summarize this conversation in 1-2 sentences. Respond ONLY with a valid JSON object containing 'title' (a short 2-3 word topic name based on the chat contents) and 'summary' (the brief description). Example: {{\"title\": \"Rust Setup\", \"summary\": \"User asked about installing Rust on Arch Linux.\"}}\\n\\nConversation turns:\\n{}",
-                turns
+                "Summarize this conversation in 1-2 sentences. Respond ONLY with a valid JSON object containing 'title' (a short 2-3 word topic name based on the chat contents) and 'summary' (the brief description). Example: {{\"title\": \"Rust Setup\", \"summary\": \"User asked about installing Rust on Arch Linux.\"}}\n\nConversation turns:\n{}",
+                turns_for_async
             );
 
             if let Ok(resp) = reqwest::Client::new()
@@ -1134,19 +1242,11 @@ pub async fn start_new_session(
                             let new_title = parsed["title"].as_str().unwrap_or(&title_fallback);
                             let new_summary = parsed["summary"].as_str().unwrap_or(&summary_fallback);
 
-                            if let Ok(vault) = vault_clone.try_lock() {
-                                let _ = vault.conn.execute(
-                                    "UPDATE conversation_summaries SET title = ?1, summary = ?2 WHERE id = ?3",
-                                    rusqlite::params![new_title, new_summary, summary_id],
-                                );
-                            } else {
-                                // Fallback lock
-                                let vault = vault_clone.lock().await;
-                                let _ = vault.conn.execute(
-                                    "UPDATE conversation_summaries SET title = ?1, summary = ?2 WHERE id = ?3",
-                                    rusqlite::params![new_title, new_summary, summary_id],
-                                );
-                            }
+                            let vault = vault_clone.lock().await;
+                            let _ = vault.conn.execute(
+                                "UPDATE conversation_summaries SET title = ?1, summary = ?2 WHERE id = ?3",
+                                rusqlite::params![new_title, new_summary, summary_id],
+                            );
                         }
                     }
                 }

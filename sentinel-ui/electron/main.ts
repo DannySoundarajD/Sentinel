@@ -72,15 +72,33 @@ function createWindow() {
 
   if (isDev) {
     let port = '51793';
-    try {
-      const portFilePath = path.join(__dirname, '../.port');
-      if (fs.existsSync(portFilePath)) {
-        port = fs.readFileSync(portFilePath, 'utf-8').trim();
+    const portFilePath = path.join(__dirname, '../.port');
+    
+    // Wait for port file with retry logic
+    const maxRetries = 30; // 3 seconds
+    let retries = 0;
+    
+    const tryLoadPort = () => {
+      try {
+        if (fs.existsSync(portFilePath)) {
+          port = fs.readFileSync(portFilePath, 'utf-8').trim();
+          console.log(`Loading dev server on port ${port}`);
+          mainWindow?.loadURL(`http://localhost:${port}`);
+        } else if (retries < maxRetries) {
+          retries++;
+          console.log(`Waiting for Vite dev server... (${retries}/${maxRetries})`);
+          setTimeout(tryLoadPort, 100);
+        } else {
+          console.warn('Port file not found, using default port 51793');
+          mainWindow?.loadURL(`http://localhost:${port}`);
+        }
+      } catch (e) {
+        console.error('Failed to read Vite port file:', e);
+        mainWindow?.loadURL(`http://localhost:${port}`);
       }
-    } catch (e) {
-      console.error('Failed to read Vite port file:', e);
-    }
-    mainWindow.loadURL(`http://localhost:${port}`);
+    };
+    
+    tryLoadPort();
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
